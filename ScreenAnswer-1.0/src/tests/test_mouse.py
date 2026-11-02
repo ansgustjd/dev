@@ -95,6 +95,7 @@ class MouseTests(unittest.TestCase):
             self.assertEqual(watcher.gate.serial,1)
         finally:
             watcher.stop.set()
+            watcher.circle_moves.put(None)
             worker.join(2)
         self.assertFalse(worker.is_alive())
 

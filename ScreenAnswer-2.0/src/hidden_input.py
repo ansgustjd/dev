@@ -75,6 +75,8 @@ class HiddenInput:
     def ensure_focus(self):
         if not self.active:
             return
+        if self.has_keyboard_focus():
+            return
         hwnd = window_handle(self.window)
         if foreground_window() != hwnd:
             info = GuiThreadInfo(cbSize=C.sizeof(GuiThreadInfo))
@@ -86,6 +88,9 @@ class HiddenInput:
             # editor keeps the system IME working, without translating raw keys.
             user = C.windll.user32
             user.SetForegroundWindow.argtypes = [W.HWND]
+            user.ShowWindow.argtypes = [W.HWND, C.c_int]
+            user.SetActiveWindow.argtypes = [W.HWND]
+            user.SetFocus.argtypes = [W.HWND]
             user.GetWindowThreadProcessId.argtypes = [W.HWND, C.POINTER(W.DWORD)]
             user.GetWindowThreadProcessId.restype = W.DWORD
             user.AttachThreadInput.argtypes = [W.DWORD, W.DWORD, W.BOOL]
@@ -94,13 +99,30 @@ class HiddenInput:
             attached = bool(foreground_thread and foreground_thread != current_thread and
                             user.AttachThreadInput(current_thread, foreground_thread, True))
             try:
+                # A hidden launcher may supply SW_HIDE in STARTUPINFO. Explicitly
+                # map the transparent receiver before assigning keyboard focus.
+                user.ShowWindow(hwnd, 5)
                 user.SetForegroundWindow(hwnd)
+                user.SetActiveWindow(hwnd)
                 self.editor.focus_force()
+                user.SetFocus(self.editor.winfo_id())
             finally:
                 if attached:
                     user.AttachThreadInput(current_thread, foreground_thread, False)
         elif self.window.focus_get() != self.editor:
             self.editor.focus_set()
+
+    def has_keyboard_focus(self):
+        if not self.active or self.window.focus_get() != self.editor:
+            return False
+        user = C.windll.user32
+        user.GetFocus.restype = W.HWND
+        user.IsChild.argtypes = [W.HWND, W.HWND]
+        hwnd, focused = window_handle(self.window), user.GetFocus()
+        # A fully transparent foreground window can temporarily be reported as
+        # NULL. Require its real native focus as well as Tk's editor focus.
+        return (foreground_window() in (None, hwnd) and bool(focused) and
+                (focused in (hwnd, self.editor.winfo_id()) or user.IsChild(hwnd, focused)))
 
     def remember(self, _event=None):
         if self.editor.edit_modified():

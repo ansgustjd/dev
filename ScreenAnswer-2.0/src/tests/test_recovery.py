@@ -16,6 +16,7 @@ class RecoveryTests(unittest.TestCase):
         app = App.__new__(App)
         app.settings = DEFAULTS.copy()
         app.root = Mock()
+        app.poll_delay_ms = Mock(return_value=50)
         app.dialog = None
         app.busy = False
         app.last_auto_selection = None

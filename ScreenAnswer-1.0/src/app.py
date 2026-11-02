@@ -24,6 +24,7 @@ from led_response import validate_result
 from monitors import monitor_workarea, capture_bounds
 from diagnostics import record_error
 from result_panel import ResultPanel
+from power import input_idle_seconds, ui_poll_ms
 from browser_selection import Clipboard, copied_selection, is_browser
 from browser_drag import BrowserCopyRequest
 from tray_hover import icon_bounds, cursor_position, contains
@@ -314,7 +315,10 @@ class App:
 
     def set_tray_color(self, color):
         self.tray_color = color
-        self.tray.icon = make_icon(color if getattr(self, 'settings', {}).get('tray_icon_changes', True) else '#72d7f3')
+        shown = color if getattr(self, 'settings', {}).get('tray_icon_changes', True) else '#72d7f3'
+        if getattr(self, 'tray_display_color', None) != shown:
+            self.tray.icon = make_icon(shown)
+            self.tray_display_color = shown
 
     def publish(self, text, color, *, error=None):
         self.last = text
@@ -994,7 +998,10 @@ class App:
                 pass
         finally:
             if not stopping:
-                self.root.after(50, self.poll)
+                self.root.after(self.poll_delay_ms(), self.poll)
+
+    def poll_delay_ms(self):
+        return ui_poll_ms(input_idle_seconds(), self.busy, getattr(self, 'manual_mode', False))
 
     def close(self):
         self.hide_tray_answer()

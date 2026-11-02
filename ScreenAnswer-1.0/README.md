@@ -50,3 +50,5 @@ Caps Lock LED 알림은 실제 키 상태를 전환하고 원래 상태로 복�
 ```
 
 Git에는 `src`, 의존성 목록, 빌드 설정, 실행·빌드 배치 파일과 이 문서를 올립니다. `.venv`, `dist`, 빌드 캐시, 개인 설정과 API 키는 제외합니다. 실행 파일 배포는 GitHub Release 등 별도 첨부로 관리할 수 있습니다.
+
+배터리·CPU 최적화 적용 목록과 측정 결과는 [POWER_OPTIMIZATION.md](POWER_OPTIMIZATION.md)를 참고하세요.

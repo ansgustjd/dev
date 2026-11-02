@@ -175,7 +175,7 @@ class FeatureTests(unittest.TestCase):
         watcher.events = queue.Queue()
         watcher.generation, watcher.current = 4, None
         auto = Mock()
-        with patch.dict('sys.modules', {'uiautomation': auto}), patch('selection.selected_text', side_effect=[(77, 'problem', (1,2,3,4)), None]), patch('selection.ctypes.windll.user32.GetAsyncKeyState', return_value=0):
+        with patch.dict('sys.modules', {'uiautomation': auto}), patch('selection.selected_text', side_effect=[(77, 'problem', (1,2,3,4)), None]), patch('selection.input_stamp', side_effect=[(77, 1), (77, 2)]), patch('selection.ctypes.windll.user32.GetAsyncKeyState', return_value=0):
             watcher.run()
         self.assertEqual(watcher.events.get_nowait(), ('selection_state', (4, (77, 'problem'))))
         self.assertEqual(watcher.events.get_nowait(), ('selection_state', (4, None)))
@@ -205,18 +205,15 @@ class FeatureTests(unittest.TestCase):
 
     def test_hotkey_release_and_reregister_thread(self):
         # Mock native API calls; do not register keys on the user's desktop.
-        user = Mock()
-        user.PeekMessageW.return_value = 0
-        user.RegisterHotKey.return_value = 1
-        user.UnregisterHotKey.return_value = 1
-        with patch('app.C.windll.user32', user):
+        with patch('hotkeys.C.windll.user32.RegisterHotKey', return_value=1) as register, \
+             patch('hotkeys.C.windll.user32.UnregisterHotKey', return_value=1) as unregister:
             handler = Hotkey(queue.Queue())
             try:
                 handler.register('Ctrl+Shift+F23')
                 handler.register(None)
                 handler.register('Ctrl+Shift+F23')
-                self.assertEqual(user.RegisterHotKey.call_count, 2)
-                self.assertEqual(user.UnregisterHotKey.call_count, 1)
+                self.assertEqual(register.call_count, 2)
+                self.assertEqual(unregister.call_count, 1)
             finally:
                 handler.commands.put(('stop',))
                 handler.thread.join(2)

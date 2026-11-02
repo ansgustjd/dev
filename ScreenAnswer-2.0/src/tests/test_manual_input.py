@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app import App, DEFAULTS
 from hotkeys import Hotkey
 from result_panel import ResultPanel
+from hidden_input import HiddenInput
 from settings_store import load_settings
 
 class ManualInputTests(unittest.TestCase):
@@ -150,6 +151,31 @@ class ManualInputTests(unittest.TestCase):
             self.assertEqual(settings['key'], 'encrypted-test')
             self.assertEqual(settings['task_preset'], '번역')
             self.assertTrue(settings['manual_input_show_panel'])
+
+    def test_restored_settings_stop_hidden_keyboard_receiver(self):
+        app = self.make_app()
+        app.manual_mode, app.manual_last_input = True, time.monotonic()
+        app.dialog = Mock()
+        app.dialog.state.return_value = 'normal'
+        app.hidden_input = Mock(active=True)
+        app.check_manual_input()
+        app.hidden_input.suspend.assert_called_once()
+
+    def test_hidden_focus_requires_owned_native_and_tk_editor_focus(self):
+        receiver = HiddenInput.__new__(HiddenInput)
+        receiver.active, receiver.window, receiver.editor = True, Mock(), Mock()
+        receiver.window.focus_get.return_value = receiver.editor
+        receiver.editor.winfo_id.return_value = 33
+        with patch('hidden_input.window_handle', return_value=11), \
+             patch('hidden_input.foreground_window', return_value=None) as foreground, \
+             patch('hidden_input.C.windll.user32.GetFocus', return_value=33) as focused, \
+             patch('hidden_input.C.windll.user32.IsChild', return_value=False):
+            self.assertTrue(receiver.has_keyboard_focus())
+            foreground.return_value = 99
+            self.assertFalse(receiver.has_keyboard_focus())
+            foreground.return_value = None
+            focused.return_value = 99
+            self.assertFalse(receiver.has_keyboard_focus())
 
     def test_native_hotkey_dispatch(self):
         events = queue.Queue()

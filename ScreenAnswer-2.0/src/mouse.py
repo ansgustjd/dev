@@ -229,10 +229,11 @@ class MouseWatcher:
     def run_circles(self):
         while not self.stop.is_set():
             try:
-                generation, point, window, now, buttons = self.circle_moves.get(timeout=.2)
+                item = self.circle_moves.get()
+                if item is None or self.stop.is_set():
+                    return
+                generation, point, window, now, buttons = item
             except queue.Empty:
-                if self.circle.points and time.monotonic() - self.circle.points[-1][2] > 1.2:
-                    self.circle.reset()
                 continue
             with self.lock:
                 if generation != self.generation or not self.circle_enabled:
@@ -323,6 +324,14 @@ class MouseWatcher:
     def close(self):
         self.enabled = False
         self.stop.set()
+        try:
+            self.circle_moves.put_nowait(None)
+        except queue.Full:
+            try:
+                self.circle_moves.get_nowait()
+                self.circle_moves.put_nowait(None)
+            except (queue.Empty, queue.Full):
+                pass
         self.ready.wait(2)
         if self.thread_id:
             C.windll.user32.PostThreadMessageW(self.thread_id, 0x12, 0, 0)

@@ -26,6 +26,8 @@ class ResultPanel(ttk.LabelFrame):
         self.displayed = [None, None]
         self.job = None
         self.bind('<Destroy>', self.stop)
+        self.bind('<Map>', self.resume)
+        self.bind('<Unmap>', self.pause)
         self.refresh()
 
     def refresh(self):
@@ -40,7 +42,18 @@ class ResultPanel(ttk.LabelFrame):
                 text.insert('1.0', value)
                 text.configure(state='disabled')
                 self.displayed[index] = value
-        self.job = self.after(250, self.refresh)
+        if self.job is not None:
+            self.after_cancel(self.job)
+        self.job = self.after(250, self.refresh) if self.winfo_ismapped() else None
+
+    def resume(self, event):
+        if event.widget == self and self.job is None:
+            self.refresh()
+
+    def pause(self, event):
+        if event.widget == self and self.job is not None:
+            self.after_cancel(self.job)
+            self.job = None
 
     def stop(self, event):
         if event.widget == self and self.job is not None:

@@ -15,7 +15,13 @@ def check_hidden_input(app):
 
     def send(events):
         receiver = app.hidden_input
-        assert receiver.active and foreground_window() == window_handle(receiver.window), 'Input receiver is not foreground'
+        deadline = time.monotonic() + 1
+        while receiver.active and not receiver.has_keyboard_focus() and time.monotonic() < deadline:
+            receiver.ensure_focus()
+            pump(.05)
+        assert receiver.has_keyboard_focus(), (
+            'Input receiver is not foreground', receiver.active, receiver.window.state(),
+            foreground_window(), window_handle(receiver.window), str(receiver.window.focus_get()))
         inputs = (Input * len(events))()
         for item, (vk, scan, flags) in zip(inputs, events):
             item.type = 1
@@ -61,7 +67,9 @@ def check_hidden_input(app):
     assert app.hidden_input.active and not app.settings_visible()
     app.open_settings()
     pump()
-    assert not app.hidden_input.active and app.settings_visible()
+    assert not app.hidden_input.active and app.settings_visible(), (
+        app.hidden_input.active, app.dialog.state(), app.manual_mode,
+        time.monotonic() - app.manual_last_input)
     app.result_panel.views[0].insert('end', ' 편집')
     pump()
     app.dialog.destroy()

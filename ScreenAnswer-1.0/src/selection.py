@@ -4,6 +4,8 @@ import os
 import threading
 import time
 from browser_drag import BrowserDragTracker
+from browser_drag import BrowserCopyRequest
+from power import SelectionRefresh, input_stamp
 
 
 def parse_delay_ms(value):
@@ -164,6 +166,7 @@ class SelectionWatcher:
         self.enabled = threading.Event()
         self.suspended = threading.Event()
         self.stop = threading.Event()
+        self.wake = threading.Event()
         self.generation = 0
         self.delay_ms = parse_delay_ms(delay_ms)
         self.browser_copy = browser_copy
@@ -176,11 +179,13 @@ class SelectionWatcher:
         if delay_ms != self.delay_ms:
             self.delay_ms = delay_ms
             self.generation += 1
+            self._wake()
 
     def set_browser_copy(self, value):
         if value != self.browser_copy:
             self.browser_copy = value
             self.generation += 1
+            self._wake()
 
     def set_enabled(self, value):
         self.generation += 1
@@ -189,6 +194,18 @@ class SelectionWatcher:
             self.enabled.set()
         else:
             self.enabled.clear()
+        self._wake()
+
+    def _wake(self):
+        if hasattr(self, 'wake'):
+            self.wake.set()
+
+    def _wait(self, delay):
+        if not hasattr(self, 'wake'):
+            return self.stop.wait(delay)
+        self.wake.wait(delay)
+        self.wake.clear()
+        return self.stop.is_set()
 
     def run(self):
         auto = None
@@ -197,8 +214,10 @@ class SelectionWatcher:
         gate = SelectionGate()
         drag = BrowserDragTracker()
         last_state = None
+        reads, sample = SelectionRefresh(), None
         try:
-            while not self.stop.wait(min(0.25, max(0.05, getattr(self, 'delay_ms', 1100) / 2000))):
+            while not self._wait(min(0.25, max(0.05, getattr(self, 'delay_ms', 1100) / 2000))
+                                 if self.enabled.is_set() else None):
                 if not self.enabled.is_set():
                     self.current = None
                     if gate.candidate is not None or gate.sent is not None:
@@ -225,14 +244,22 @@ class SelectionWatcher:
                     gate = SelectionGate(delay=getattr(self, 'delay_ms', 1100) / 1000, cooldown=0)
                     drag = BrowserDragTracker()
                     generation = active_generation
+                    reads, sample = SelectionRefresh(), None
                 try:
                     # A gesture token remains stable while Ctrl+C is processed;
                     # unreliable PDF UIA ranges must not cancel a valid copy.
-                    sample = drag.poll(auto) if getattr(self, 'browser_copy', False) else None
-                    if sample is None:
-                        sample = selected_text(auto, with_position=True)
-                    signature = sample[:2] if sample else None
+                    now = time.monotonic()
                     selecting = any(ctypes.windll.user32.GetAsyncKeyState(key) & 0x8000 for key in (1, 16))
+                    browser_sample = drag.poll(auto) if getattr(self, 'browser_copy', False) else None
+                    refresh = reads.due(input_stamp(), now, selecting,
+                                        None if self.suspended.is_set() else gate)
+                    if browser_sample is not None:
+                        sample = browser_sample
+                    elif refresh:
+                        sample = selected_text(auto, with_position=True)
+                    elif sample and isinstance(sample[1], BrowserCopyRequest):
+                        sample = None
+                    signature = sample[:2] if sample else None
                     # A fresh drag/Shift selection is a new user action even if
                     # the provider keeps reporting the same selected text.
                     # Clear dispatch/dedup state until the gesture is released.
@@ -243,9 +270,9 @@ class SelectionWatcher:
                         self.events.put(('selection_state', state))
                     if self.suspended.is_set():
                         if selecting:
-                            gate.observe(signature, time.monotonic(), selecting=True)
+                            gate.observe(signature, now, selecting=True)
                         continue
-                    ready = gate.observe(signature, time.monotonic(), selecting)
+                    ready = gate.observe(signature, now, selecting)
                     if ready and self.enabled.is_set() and not self.suspended.is_set() and active_generation == self.generation:
                         self.events.put(('selection', (active_generation, sample)))
                 except Exception:
@@ -263,4 +290,5 @@ class SelectionWatcher:
     def close(self):
         self.enabled.clear()
         self.stop.set()
+        self._wake()
         self.thread.join(timeout=0.5)

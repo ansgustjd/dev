@@ -24,6 +24,7 @@ from led_response import validate_result
 from monitors import monitor_workarea, capture_bounds
 from diagnostics import record_error
 from result_panel import ResultPanel
+from power import input_idle_seconds, ui_poll_ms
 from hidden_input import HiddenInput, foreground_window, window_handle
 from browser_selection import Clipboard, copied_selection, is_browser
 from browser_drag import BrowserCopyRequest
@@ -330,7 +331,9 @@ class App:
     def set_tray_color(self, color):
         self.tray_color = color
         shown = '#ffc86b' if getattr(self, 'manual_mode', False) else '#ff8484' if getattr(self, 'manual_idle', False) else color if getattr(self, 'settings', {}).get('tray_icon_changes', True) else '#72d7f3'
-        self.tray.icon = make_icon(shown)
+        if getattr(self, 'tray_display_color', None) != shown:
+            self.tray.icon = make_icon(shown)
+            self.tray_display_color = shown
 
     def publish(self, text, color, *, error=None):
         self.last = text
@@ -408,7 +411,10 @@ class App:
             self.input_status('5초 동안 입력이 없어 입력 모드를 해제했습니다.')
             return
         receiver = getattr(self, 'hidden_input', None)
-        if not self.settings_visible():
+        if self.settings_visible():
+            if receiver is not None and receiver.active:
+                receiver.suspend()
+        else:
             if receiver is None or not receiver.active:
                 self.activate_hidden_input()
             else:
@@ -679,6 +685,7 @@ class App:
         threading.Thread(target=worker, daemon=True).start()
 
     def open_settings(self):
+        self.manual_activity()
         receiver = getattr(self, 'hidden_input', None)
         if receiver is not None:
             receiver.suspend()
@@ -689,6 +696,7 @@ class App:
             if getattr(self, 'manual_mode', False):
                 self.result_panel.sync()
                 self.result_panel.views[0].focus_force()
+                self.manual_activity()
             return
         dialog = self.dialog = tk.Toplevel(self.root)
         dialog.bind('<KeyPress>', lambda _: self.manual_activity(), add='+')
@@ -704,6 +712,14 @@ class App:
                 if getattr(self, 'manual_mode', False):
                     self.root.after_idle(self.activate_hidden_input)
         dialog.bind('<Destroy>', dismissed, add='+')
+        def revealed(event):
+            if event.widget == dialog and getattr(self, 'manual_mode', False):
+                receiver = getattr(self, 'hidden_input', None)
+                if receiver is not None:
+                    receiver.suspend()
+                self.manual_activity()
+                self.result_panel.views[0].focus_force()
+        dialog.bind('<Map>', revealed, add='+')
         style = ttk.Style(dialog)
         style.configure('Settings.Title.TLabel', font=('Malgun Gothic', 13, 'bold'))
         style.configure('Settings.Hint.TLabel', foreground='#687280')
@@ -1168,7 +1184,10 @@ class App:
                     self.check_manual_input()
                 except Exception as error:
                     record_error('manual_input', error)
-                self.root.after(50, self.poll)
+                self.root.after(self.poll_delay_ms(), self.poll)
+
+    def poll_delay_ms(self):
+        return ui_poll_ms(input_idle_seconds(), self.busy, getattr(self, 'manual_mode', False))
 
     def close(self):
         self.manual_mode = False
@@ -1210,6 +1229,8 @@ def main():
     if not mutex:
         raise C.WinError(C.get_last_error())
     if C.get_last_error() == 183:
+        if '--manual-runtime-test' in sys.argv or '--smoke-test' in sys.argv:
+            raise SystemExit(2)
         messagebox.showinfo('ScreenAnswer', '이미 실행 중입니다. 시스템 트레이의 아이콘을 확인하세요.')
         return
     try:
@@ -1257,6 +1278,13 @@ def main():
                 app.manual_hotkey.register(None)
                 from runtime_checks import check_hidden_input
                 check_hidden_input(app)
+                APP_DIR.mkdir(parents=True, exist_ok=True)
+                (APP_DIR / 'manual-runtime-status.txt').write_text('PASS', encoding='utf-8')
+            except Exception:
+                import traceback
+                APP_DIR.mkdir(parents=True, exist_ok=True)
+                (APP_DIR / 'manual-runtime-status.txt').write_text(traceback.format_exc(), encoding='utf-8')
+                raise SystemExit(1)
             finally:
                 app.close()
             return
