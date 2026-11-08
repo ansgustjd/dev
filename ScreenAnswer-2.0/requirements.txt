@@ -1,3 +1,0 @@
-Pillow>=10.4,<13
-pystray==0.19.5
-uiautomation==2.0.29

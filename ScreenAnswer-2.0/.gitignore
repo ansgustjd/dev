@@ -1,9 +1,0 @@
-.venv/
-dist/
-build/
-__pycache__/
-*.py[cod]
-.env
-.env.*
-settings*.json
-*.log
